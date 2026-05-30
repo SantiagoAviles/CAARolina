@@ -1,29 +1,27 @@
+# -*- coding: utf-8 -*-
 """
-Algoritmo de cifrado simétrico personalizado
-Basado en: permutación dinámica + suma modular + mezcla XOR
+Algoritmo CCAR — Hash con salt automático
+Cazorla, Chambi, Avilés, Rivero
 """
 
-MOD    = 256
-RONDAS = 10
+import os
 
-# ══════════════════════════════════════════════════
-#  UTILIDADES
-# ══════════════════════════════════════════════════
+MOD = 256
 
-def texto_a_bytes(texto: str) -> list:
+# ── UTILIDADES ────────────────────────────────────────────────────────────────
+
+def texto_a_bytes(texto):
     return list(texto.encode("utf-8"))
 
-def bytes_a_texto(lista: list) -> str:
+def bytes_a_texto(lista):
     return bytes(lista).decode("utf-8", errors="ignore")
 
-def bytes_a_hex(lista: list) -> str:
-    return "".join(format(b, "02x") for b in lista)
+def bytes_a_hex(lista):
+    return ''.join(format(b, '02x') for b in lista)
 
-# ══════════════════════════════════════════════════
-#  PERMUTACIÓN DINÁMICA
-# ══════════════════════════════════════════════════
+# ── PERMUTACIÓN DINÁMICA ──────────────────────────────────────────────────────
 
-def generar_perm(clave_bytes: list, tam: int, ronda: int) -> list:
+def generar_perm(clave_bytes, tam, ronda):
     subclave = clave_bytes.copy()
     while len(subclave) < tam:
         subclave += clave_bytes
@@ -36,142 +34,87 @@ def generar_perm(clave_bytes: list, tam: int, ronda: int) -> list:
     k = ronda % tam
     return perm[k:] + perm[:k]
 
-def inversa_perm(perm: list) -> list:
-    """Calcula la permutación inversa."""
+def inversa_perm(perm):
     inv = [0] * len(perm)
     for i, p in enumerate(perm):
         inv[p] = i
     return inv
 
-def aplicar_perm(bloque: list, perm: list) -> list:
+def aplicar_perm(bloque, perm):
     return [bloque[i] for i in perm]
 
-# ══════════════════════════════════════════════════
-#  BUFFER DETERMINISTA POR RONDA
-#  (derivado solo de clave + nro de ronda, sin estado mutable)
-#  Esto permite revertirlo exactamente igual en el descifrado
-# ══════════════════════════════════════════════════
+# ── RONDA DE CIFRADO ──────────────────────────────────────────────────────────
 
-def generar_buffer(clave_bytes: list, ronda: int, size: int = 512) -> list:
-    semilla = clave_bytes + [ronda % 256, (ronda * 7 + 13) % 256]
-    return [(semilla[i % len(semilla)] ^ i ^ ronda) % 256 for i in range(size)]
-
-def mezclar_xor(data: list, buffer: list) -> list:
-    """XOR con el buffer. Es su propia inversa: aplicar 2 veces = datos originales."""
-    return [data[i] ^ buffer[i % len(buffer)] for i in range(len(data))]
-
-# ══════════════════════════════════════════════════
-#  RONDA DE CIFRADO
-# ══════════════════════════════════════════════════
-
-def ronda_cifrado(data_bytes: list, clave_bytes: list, ronda: int) -> list:
+def ronda_cifrado(data_bytes, clave_bytes, ronda):
     resultado = []
-    i      = 0
-    k_idx  = 0
-
-    while i < len(data_bytes):
-        tam    = (clave_bytes[k_idx % len(clave_bytes)] % 5) + 2
-        bloque = list(data_bytes[i : i + tam])
-
-        # Padding si el último bloque es corto
-        if len(bloque) < tam:
-            bloque += [0] * (tam - len(bloque))
-
-        k = clave_bytes[k_idx % len(clave_bytes)]
-
-        # 1. Suma modular
-        bloque = [(x + k + ronda) % MOD for x in bloque]
-
-        # 2. Permutación dinámica
-        perm   = generar_perm(clave_bytes, len(bloque), ronda)
-        bloque = aplicar_perm(bloque, perm)
-
-        resultado.extend(bloque)
-        i     += tam
-        k_idx += 1
-
-    return resultado
-
-# ══════════════════════════════════════════════════
-#  RONDA DE DESCIFRADO  (operaciones en orden inverso)
-# ══════════════════════════════════════════════════
-
-def ronda_descifrado(data_bytes: list, clave_bytes: list, ronda: int) -> list:
-    resultado = []
-    i     = 0
+    i = 0
     k_idx = 0
 
     while i < len(data_bytes):
-        tam    = (clave_bytes[k_idx % len(clave_bytes)] % 5) + 2
-        bloque = list(data_bytes[i : i + tam])
+        tam = (clave_bytes[k_idx % len(clave_bytes)] % 5) + 2
+        bloque = data_bytes[i:i+tam]
 
         if len(bloque) < tam:
             bloque += [0] * (tam - len(bloque))
 
         k = clave_bytes[k_idx % len(clave_bytes)]
+        bloque = [(x + k + ronda) % MOD for x in bloque]
 
-        # Inverso de ronda_cifrado: primero despermutar, luego restar
-        perm   = generar_perm(clave_bytes, len(bloque), ronda)
-        inv    = inversa_perm(perm)
-        bloque = aplicar_perm(bloque, inv)
-
-        bloque = [(x - k - ronda) % MOD for x in bloque]
+        perm = generar_perm(clave_bytes, len(bloque), ronda)
+        bloque = aplicar_perm(bloque, perm)
 
         resultado.extend(bloque)
-        i     += tam
+        i += tam
         k_idx += 1
 
     return resultado
 
-# ══════════════════════════════════════════════════
-#  CIFRADO COMPLETO
-# ══════════════════════════════════════════════════
+# ── MEZCLA CON BUFFER ─────────────────────────────────────────────────────────
 
-def cifrar(mensaje: str, clave: str) -> str:
+def mezclar_buffer(data_bytes, buffer):
+    for i in range(len(data_bytes)):
+        data_bytes[i] = (data_bytes[i] ^ buffer[i % len(buffer)]) % MOD
+        buffer[i % len(buffer)] = (buffer[i % len(buffer)] + data_bytes[i]) % MOD
+    return data_bytes
+
+# ── HASH CCAR (pública) ───────────────────────────────────────────────────────
+
+def ccar_hash(password: str, seed: str) -> tuple[str, str]:
     """
-    Cifra un mensaje con la clave dada.
-    Retorna el texto cifrado en hexadecimal.
+    Genera un hash CCAR del texto dado.
+    Retorna (hash_hex, salt_hex).
+    El salt es aleatorio y debe guardarse junto al hash para verificar.
     """
-    data = texto_a_bytes(mensaje)
+    salt = os.urandom(8)
+    salt_str = salt.hex()
 
-    # Guardamos la longitud original en 4 bytes (big-endian)
-    # para poder recortarla exactamente al descifrar
-    length = len(data)
-    data = list(length.to_bytes(4, "big")) + data
+    texto = password + salt_str
+    data = texto_a_bytes(texto)
+    buffer = [i % 256 for i in range(256)]
 
-    for ronda in range(RONDAS):
-        clave_r = texto_a_bytes(clave + str(ronda))
-        data    = ronda_cifrado(data, clave_r, ronda)
-        buf     = generar_buffer(clave_r, ronda)
-        data    = mezclar_xor(data, buf)
+    for i in range(50):
+        estado = bytes_a_texto(data[:4])
+        clave = seed + str(i) + estado
+        clave_bytes = texto_a_bytes(clave)
+        data = ronda_cifrado(data, clave_bytes, i)
+        data = mezclar_buffer(data, buffer)
 
-    return bytes_a_hex(data)
+    return bytes_a_hex(data), salt_str
 
 
-def descifrar(hex_texto: str, clave: str):
+def ccar_verificar(password: str, seed: str, salt: str, hash_guardado: str) -> bool:
     """
-    Descifra un texto hexadecimal con la clave dada.
-    Retorna el mensaje original (str), o None si falla.
+    Verifica si el texto coincide con un hash CCAR previamente generado.
     """
-    try:
-        data = list(bytes.fromhex(hex_texto.strip()))
-    except ValueError:
-        return None
+    texto = password + salt
+    data = texto_a_bytes(texto)
+    buffer = [i % 256 for i in range(256)]
 
-    # Recorremos las rondas en orden INVERSO
-    for ronda in range(RONDAS - 1, -1, -1):
-        clave_r = texto_a_bytes(clave + str(ronda))
-        buf     = generar_buffer(clave_r, ronda)
-        data    = mezclar_xor(data, buf)        # XOR es su propia inversa
-        data    = ronda_descifrado(data, clave_r, ronda)
+    for i in range(50):
+        estado = bytes_a_texto(data[:4])
+        clave = seed + str(i) + estado
+        clave_bytes = texto_a_bytes(clave)
+        data = ronda_cifrado(data, clave_bytes, i)
+        data = mezclar_buffer(data, buffer)
 
-    if len(data) < 4:
-        return None
-
-    # Recuperamos la longitud original
-    length = int.from_bytes(bytes(data[:4]), "big")
-
-    if length < 0 or length > len(data) - 4:
-        return None  # Clave incorrecta → longitud corrupta
-
-    return bytes_a_texto(data[4 : 4 + length])
+    return bytes_a_hex(data) == hash_guardado

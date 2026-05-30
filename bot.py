@@ -1,13 +1,15 @@
+# -*- coding: utf-8 -*-
 """
-Bot de Telegram — Cifrador/Descifrador
-Requiere: pip install python-telegram-bot
+Bot de Telegram — Cifrado CCAR
+La clave del sistema es interna. El usuario solo provee su texto.
 
 Comandos:
-  /start         — bienvenida
-  /ayuda         — instrucciones
-  /cifrar        — cifra un mensaje (acepta "random" como clave)
-  /descifrar     — descifra un hexadecimal (acepta "random" para usar última clave generada)
-  /irvin         — 👀
+  /start      — bienvenida
+  /ayuda      — instrucciones
+  /hash       — genera hash CCAR de un texto
+  /verificar  — verifica si un texto coincide con un hash guardado
+  /irvin      — 👀
+  /pibble     — 🐶
 """
 
 import asyncio
@@ -16,22 +18,22 @@ import random
 import string
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from cifrador import cifrar, descifrar
+from cifrador import ccar_hash, ccar_verificar
 
 # ── CONFIGURACIÓN ─────────────────────────────────────────────────────────────
 TOKEN = "8575945227:AAHkoghACUUqnkh7DBB8h_vqHN3OMVpRhNk"
+
+# Seed del sistema — nunca se muestra al usuario
+_SEED = "CCAR_SISTEMA_2024_CazorlaChambiaAvilesRivero"
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     level=logging.INFO,
 )
 
-MAX_MENSAJE = 800
+MAX_TEXTO = 800
 
-# Guarda la última clave random por usuario { user_id: clave }
-ultimas_claves_random: dict = {}
-
-# ── CHISTES DE PAPÁ ───────────────────────────────────────────────────────────
+# ── CHISTES ───────────────────────────────────────────────────────────────────
 CHISTES = [
     "¿Por qué los pájaros vuelan hacia el sur en invierno? ¡Porque caminando tardarían demasiado!",
     "¿Qué le dijo el semáforo al auto? ¡No me mires, me estoy cambiando!",
@@ -68,13 +70,13 @@ CHISTES = [
     "¿Por qué el computador fue al médico? Porque tenía un virus.",
     "¿Cómo llamas a un dinosaurio con buena educación? Un cortesaurio.",
     "¿Qué hace la mantequilla cuando está nerviosa? Se derrite.",
-    "¿Por qué el número 6 le tiene miedo al 7? Porque 7, 8, 9. (siete se comió a nueve)",
+    "¿Por qué el número 6 le tiene miedo al 7? Porque 7 se comió al 9.",
     "¿Cuál es el colmo de un jardinero? Que su mujer le ponga los cuernos.",
     "¿Qué le dijo un papel a otro? Oye, somos pliegos.",
     "¿Por qué las bicicletas no pueden pararse solas? Porque están dos-cansadas.",
     "¿Cómo se llama el campeón de natación? Salvador.",
     "¿Qué le dice una pared a la otra? Yo no me meto en tus esquinas.",
-    "¿Por qué el maestro llevó anteojos a la escuela? Porque tenía pupil-as.",
+    "¿Por qué el maestro llevó anteojos a la escuela? Porque tenía muchos alumnos.",
     "¿Cuál es el colmo de un fumador? Que sus hijos salgan humo.",
     "¿Qué hace un pájaro con internet? Busca en el Googol.",
     "¿Por qué el café nunca gana en el casino? Porque siempre está molido.",
@@ -133,155 +135,127 @@ CHISTES = [
     "¿Qué hace un reloj en el espacio? ¡Cuenta el tiempo interestelar!",
 ]
 
-
-def clave_aleatoria(largo: int = 16) -> str:
-    caracteres = string.ascii_letters + string.digits
-    return "".join(random.choices(caracteres, k=largo))
-
-
 # ── COMANDOS ──────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
-        "🔐 *Bot de Cifrado*\n\n"
-        "Puedo cifrar y descifrar mensajes usando un algoritmo "
-        "de permutación dinámica + suma modular.\n\n"
+        "🔐 *Bot CCAR — Cifrado con Hash*\n\n"
+        "Este bot usa el algoritmo CCAR para generar huellas "
+        "únicas de cualquier texto\\. La clave del sistema es interna "
+        "y nunca se comparte\\.\n\n"
         "📌 *Comandos:*\n"
-        "• `/cifrar CLAVE tu mensaje`\n"
-        "• `/cifrar random tu mensaje` — clave automática\n"
-        "• `/descifrar CLAVE texto\\_en\\_hex`\n"
-        "• `/descifrar random texto\\_en\\_hex` — usa tu última clave random\n"
-        "• `/ayuda` — ver ejemplos\n\n"
-        "_La clave puede ser cualquier palabra, frase, o *random*._"
+        "• `/hash <texto>` — genera el hash CCAR de tu texto\n"
+        "• `/verificar <texto> <salt> <hash>` — comprueba si coincide\n"
+        "• `/ayuda` — ver ejemplos paso a paso"
     )
-    await update.message.reply_text(texto, parse_mode="Markdown")
+    await update.message.reply_text(texto, parse_mode="MarkdownV2")
 
 
 async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
-        "📖 *Cómo usar el bot*\n\n"
-        "*🔒 Cifrar con tu clave:*\n"
-        "`/cifrar miClave Hola mundo secreto`\n\n"
-        "*🎲 Cifrar con clave random:*\n"
-        "`/cifrar random Hola mundo secreto`\n"
-        "→ El bot genera una clave automática y te la muestra\n\n"
-        "*🔓 Descifrar con tu clave:*\n"
-        "`/descifrar miClave 0a1b2c3d...`\n\n"
-        "*🎲 Descifrar con la última clave random:*\n"
-        "`/descifrar random 0a1b2c3d...`\n"
-        "→ Usa la última clave random que se generó para vos\n\n"
+        "📖 *Cómo usar el bot CCAR*\n\n"
+        "*Paso 1 — Generar hash de un texto:*\n"
+        "`/hash MiContraseñaSegura`\n"
+        "→ El bot responde con el *hash* y el *salt*\n"
+        "→ Guarda ambos, los necesitarás para verificar\n\n"
+        "*Paso 2 — Verificar más tarde:*\n"
+        "`/verificar MiContraseñaSegura <salt> <hash>`\n"
+        "→ El bot te dice si coincide ✅ o no ❌\n\n"
         "⚠️ *Importante:*\n"
-        "— La clave debe ser *exactamente igual* para cifrar y descifrar.\n"
-        "— Máximo *800 caracteres* por mensaje."
+        "— El hash es *unidireccional*: no se puede revertir\n"
+        "— Cada vez que uses `/hash` con el mismo texto, "
+        "el hash será *diferente* por el salt aleatorio\n"
+        "— Para verificar siempre necesitas los tres: texto, salt y hash"
     )
     await update.message.reply_text(texto, parse_mode="Markdown")
 
 
-async def cmd_cifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
-    user_id = update.effective_user.id
 
-    if len(args) < 2:
+    if not args:
         await update.message.reply_text(
-            "❌ *Faltan argumentos.*\n\n"
-            "Uso: `/cifrar CLAVE mensaje`\n"
-            "O con clave aleatoria: `/cifrar random mensaje`",
+            "❌ *Falta el texto.*\n\n"
+            "Uso: `/hash tu texto aqui`\n"
+            "Ejemplo: `/hash MiContraseña123`",
             parse_mode="Markdown",
         )
         return
 
-    # Detectar clave random
-    es_random = args[0].lower() == "random"
-    if es_random:
-        clave = clave_aleatoria()
-        ultimas_claves_random[user_id] = clave
-    else:
-        clave = args[0]
+    texto = " ".join(args)
 
-    mensaje = " ".join(args[1:])
-
-    if len(mensaje) > MAX_MENSAJE:
+    if len(texto) > MAX_TEXTO:
         await update.message.reply_text(
-            f"⚠️ El mensaje es demasiado largo. Máximo {MAX_MENSAJE} caracteres."
+            f"⚠️ El texto es demasiado largo. Máximo {MAX_TEXTO} caracteres."
         )
         return
 
     try:
-        resultado = cifrar(mensaje, clave)
-
-        if es_random:
-            respuesta = (
-                f"🎲 *Clave generada automáticamente:*\n`{clave}`\n\n"
-                f"🔒 *Mensaje cifrado:*\n`{resultado}`\n\n"
-                f"_Guarda la clave. La necesitas para descifrar._\n"
-                f"_O usá `/descifrar random <hex>` si no cerraste el bot\\._"
-            )
-            await update.message.reply_text(respuesta, parse_mode="MarkdownV2")
-        else:
-            await update.message.reply_text(
-                f"🔒 *Mensaje cifrado:*\n\n`{resultado}`\n\n"
-                f"_Longitud original: {len(mensaje)} chars → {len(resultado)} hex chars_",
-                parse_mode="Markdown",
-            )
+        hash_val, salt = ccar_hash(texto, _SEED)
+        respuesta = (
+            f"✅ *Hash CCAR generado*\n\n"
+            f"🔑 *Salt:*\n`{salt}`\n\n"
+            f"🔒 *Hash:*\n`{hash_val}`\n\n"
+            f"_Guarda el salt y el hash\\. "
+            f"Los necesitas para verificar más tarde\\._"
+        )
+        await update.message.reply_text(respuesta, parse_mode="MarkdownV2")
     except Exception as e:
-        logging.error(f"Error al cifrar: {e}")
-        await update.message.reply_text(f"⚠️ Error inesperado al cifrar: {e}")
+        logging.error(f"Error en /hash: {e}")
+        await update.message.reply_text(f"⚠️ Error inesperado: {e}")
 
 
-async def cmd_descifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_verificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
-    user_id = update.effective_user.id
 
-    if len(args) < 2:
+    # Necesita mínimo 3 args: texto(s), salt, hash
+    if len(args) < 3:
         await update.message.reply_text(
             "❌ *Faltan argumentos.*\n\n"
-            "Uso: `/descifrar CLAVE hexadecimal`\n"
-            "O con clave random: `/descifrar random hexadecimal`",
+            "Uso: `/verificar <texto> <salt> <hash>`\n\n"
+            "Si tu texto tiene espacios, pon el salt y hash al final:\n"
+            "`/verificar mi texto con espacios <salt> <hash>`",
             parse_mode="Markdown",
         )
         return
 
-    # Detectar clave random
-    es_random = args[0].lower() == "random"
-    if es_random:
-        clave = ultimas_claves_random.get(user_id)
-        if not clave:
-            await update.message.reply_text(
-                "⚠️ No tienes ninguna clave random guardada\\.\n\n"
-                "Primero cifra algo con `/cifrar random mensaje` "
-                "para que se genere una\\.",
-                parse_mode="MarkdownV2",
-            )
-            return
-    else:
-        clave = args[0]
+    # El hash es el último arg, el salt es el penúltimo, el texto es todo lo demás
+    hash_dado = args[-1]
+    salt_dado = args[-2]
+    texto     = " ".join(args[:-2])
 
-    hex_texto = args[1]
+    # Validar que salt y hash parezcan hex
+    def es_hex(s):
+        return all(c in "0123456789abcdefABCDEF" for c in s)
 
-    if not all(c in "0123456789abcdefABCDEF" for c in hex_texto):
+    if not es_hex(salt_dado) or not es_hex(hash_dado):
         await update.message.reply_text(
-            "❌ El texto no parece ser hexadecimal válido.\n"
-            "Asegúrate de copiar el resultado completo del cifrado."
+            "❌ El salt o el hash no tienen formato válido.\n"
+            "Asegúrate de copiar exactamente los valores que devolvió el bot."
         )
         return
 
     try:
-        resultado = descifrar(hex_texto, clave)
+        resultado = ccar_verificar(texto, _SEED, salt_dado, hash_dado)
 
-        if resultado is None:
-            msg = "❌ *No se pudo descifrar.*\n\nVerifica:\n• Hex completo sin espacios\n• Clave exactamente igual"
-            if es_random:
-                msg += "\n• Que el mensaje fue cifrado con la misma sesión random"
-            await update.message.reply_text(msg, parse_mode="Markdown")
-        else:
-            prefijo = f"_Clave random usada: `{clave}`_\n\n" if es_random else ""
+        if resultado:
             await update.message.reply_text(
-                f"{prefijo}🔓 *Mensaje descifrado:*\n\n`{resultado}`",
+                "✅ *Verificación exitosa*\n\n"
+                "El texto coincide con el hash guardado.",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text(
+                "❌ *Verificación fallida*\n\n"
+                "El texto *no* coincide con el hash guardado.\n\n"
+                "Verifica que:\n"
+                "• El texto sea exactamente igual al original\n"
+                "• El salt y el hash sean los correctos",
                 parse_mode="Markdown",
             )
     except Exception as e:
-        logging.error(f"Error al descifrar: {e}")
-        await update.message.reply_text(f"⚠️ Error inesperado al descifrar: {e}")
+        logging.error(f"Error en /verificar: {e}")
+        await update.message.reply_text(f"⚠️ Error inesperado: {e}")
 
 
 async def cmd_irvin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -305,12 +279,12 @@ async def main():
 
     app.add_handler(CommandHandler("start",     cmd_start))
     app.add_handler(CommandHandler("ayuda",     cmd_ayuda))
-    app.add_handler(CommandHandler("cifrar",    cmd_cifrar))
-    app.add_handler(CommandHandler("descifrar", cmd_descifrar))
+    app.add_handler(CommandHandler("hash",      cmd_hash))
+    app.add_handler(CommandHandler("verificar", cmd_verificar))
     app.add_handler(CommandHandler("irvin",     cmd_irvin))
     app.add_handler(CommandHandler("pibble",    cmd_pibble))
 
-    print("🤖 Bot iniciado. Esperando mensajes... (Ctrl+C para detener)")
+    print("🤖 Bot CCAR iniciado. Esperando mensajes... (Ctrl+C para detener)")
 
     async with app:
         await app.start()
