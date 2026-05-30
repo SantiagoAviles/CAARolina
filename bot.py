@@ -24,7 +24,7 @@ from cifrador import ccar_hash, ccar_verificar
 TOKEN = "8575945227:AAHkoghACUUqnkh7DBB8h_vqHN3OMVpRhNk"
 
 # Seed del sistema — nunca se muestra al usuario
-_SEED = "CCAR_SISTEMA_2024_CazorlaChambiaAvilesRivero"
+_SEED = "CCARolinaOSEACazorlaChambiAvilesRiveroAPesarQueNoEsteEnOrdenAlfabetico"
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
