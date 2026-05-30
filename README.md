@@ -62,7 +62,7 @@ TOKEN = "TU_TOKEN_AQUI"
 
 **3. (Opcional) Cambiar la seed del sistema**
 
-La seed es la clave interna del algoritmo. Puedes cambiarla en la línea 21 de `bot.py`:
+La seed es la clave interna del algoritmo. Puedes cambiarla en la línea 27 de `bot.py`:
 
 ```python
 _SEED = "TU_FRASE_SECRETA_AQUI"
@@ -156,4 +156,4 @@ Simplemente deja la terminal abierta con `python bot.py` corriendo.
 
 ## Autores
 
-**Cazorla · Chambia · Avilés · Rivero**
+**Irvin Cazorla · Melissa Chambi · Santiago Avilés · Edgardo Rivero**
