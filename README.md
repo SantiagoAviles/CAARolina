@@ -1,6 +1,6 @@
 # 🔐 Bot CCAR — Cifrado con Hash en Telegram
 
-Bot de Telegram que implementa el algoritmo de hash **CCAR** (Cazorla, Chambia, Avilés, Rivero), basado en permutación dinámica, suma modular y mezcla XOR con buffer. La clave del sistema es interna y nunca se expone al usuario.
+Bot de Telegram que implementa el algoritmo de hash **CCAR** (Cazorla, Chambi, Avilés, Rivero), basado en permutación dinámica, suma modular y mezcla XOR con buffer. La clave del sistema es interna y nunca se expone al usuario.
 
 ---
 
