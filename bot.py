@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Bot de Telegram — Cifrado CCAR
+Bot de Telegram — Cifrado CCARolina
 La clave del sistema es interna. El usuario solo provee su texto.
 
 Comandos:
   /start      — bienvenida
   /ayuda      — instrucciones
-  /hash       — genera hash CCAR de un texto
+  /cifrar     — cifra un texto (reversible)
+  /descifrar  — descifra un texto cifrado
+  /hash       — genera hash CCARolina de un texto
   /verificar  — verifica si un texto coincide con un hash guardado
   /irvin      — 👀
   /pibble     — 🐶
@@ -18,7 +20,7 @@ import random
 import string
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from cifrador import ccar_hash, ccar_verificar
+from cifrador import ccar_hash, ccar_verificar, ccar_cifrar, ccar_descifrar
 
 # ── CONFIGURACIÓN ─────────────────────────────────────────────────────────────
 TOKEN = "8575945227:AAHkoghACUUqnkh7DBB8h_vqHN3OMVpRhNk"
@@ -139,11 +141,13 @@ CHISTES = [
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
-        "🔐 *Bot CCAR — Cifrado con Hash*\n\n"
-        "Este bot usa el algoritmo CCAR para generar huellas "
-        "únicas de cualquier texto\\. La clave del sistema es interna "
+        "🔐 *Bot CCARolina — Cifrado con Hash*\n\n"
+        "Este bot usa el algoritmo CCAR para cifrar textos "
+        "y generar huellas únicas\\. La clave del sistema es interna "
         "y nunca se comparte\\.\n\n"
         "📌 *Comandos:*\n"
+        "• `/cifrar <texto>` — cifra un texto \\(reversible\\)\n"
+        "• `/descifrar <cifrado> <salt>` — recupera el texto original\n"
         "• `/hash <texto>` — genera el hash CCAR de tu texto\n"
         "• `/verificar <texto> <salt> <hash>` — comprueba si coincide\n"
         "• `/ayuda` — ver ejemplos paso a paso"
@@ -154,18 +158,26 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "📖 *Cómo usar el bot CCAR*\n\n"
-        "*Paso 1 — Generar hash de un texto:*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔁 *CIFRADO SIMÉTRICO (reversible)*\n\n"
+        "*Paso 1 — Cifrar un texto:*\n"
+        "`/cifrar MiMensajeSecreto`\n"
+        "→ El bot responde con el *cifrado* y el *salt*\n"
+        "→ Guarda ambos para poder descifrar después\n\n"
+        "*Paso 2 — Descifrar:*\n"
+        "`/descifrar <cifrado> <salt>`\n"
+        "→ El bot devuelve el texto original\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔒 *HASH (unidireccional)*\n\n"
+        "*Paso 1 — Generar hash:*\n"
         "`/hash MiContraseñaSegura`\n"
-        "→ El bot responde con el *hash* y el *salt*\n"
-        "→ Guarda ambos, los necesitarás para verificar\n\n"
-        "*Paso 2 — Verificar más tarde:*\n"
+        "→ El bot responde con el *hash* y el *salt*\n\n"
+        "*Paso 2 — Verificar:*\n"
         "`/verificar MiContraseñaSegura <salt> <hash>`\n"
         "→ El bot te dice si coincide ✅ o no ❌\n\n"
-        "⚠️ *Importante:*\n"
-        "— El hash es *unidireccional*: no se puede revertir\n"
-        "— Cada vez que uses `/hash` con el mismo texto, "
-        "el hash será *diferente* por el salt aleatorio\n"
-        "— Para verificar siempre necesitas los tres: texto, salt y hash"
+        "⚠️ *Diferencia clave:*\n"
+        "— `/cifrar` es *reversible*: puedes recuperar el texto\n"
+        "— `/hash` es *unidireccional*: solo sirve para verificar"
     )
     await update.message.reply_text(texto, parse_mode="Markdown")
 
@@ -258,6 +270,83 @@ async def cmd_verificar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ Error inesperado: {e}")
 
 
+async def cmd_cifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+
+    if not args:
+        await update.message.reply_text(
+            "❌ *Falta el texto.*\n\n"
+            "Uso: `/cifrar tu texto aqui`\n"
+            "Ejemplo: `/cifrar MiMensajeSecreto`",
+            parse_mode="Markdown",
+        )
+        return
+
+    texto = " ".join(args)
+
+    if len(texto) > MAX_TEXTO:
+        await update.message.reply_text(
+            f"⚠️ El texto es demasiado largo. Máximo {MAX_TEXTO} caracteres."
+        )
+        return
+
+    try:
+        cifrado, salt = ccar_cifrar(texto, _SEED)
+        respuesta = (
+            f"✅ *Texto cifrado*\n\n"
+            f"🔑 *Salt:*\n`{salt}`\n\n"
+            f"🔒 *Cifrado:*\n`{cifrado}`\n\n"
+            f"_Guarda el salt\\. Sin él no podrás descifrar\\._"
+        )
+        await update.message.reply_text(respuesta, parse_mode="MarkdownV2")
+    except Exception as e:
+        logging.error(f"Error en /cifrar: {e}")
+        await update.message.reply_text(f"⚠️ Error inesperado: {e}")
+
+
+async def cmd_descifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+
+    # Necesita mínimo 2 args: cifrado y salt
+    if len(args) < 2:
+        await update.message.reply_text(
+            "❌ *Faltan argumentos.*\n\n"
+            "Uso: `/descifrar <cifrado> <salt>`\n\n"
+            "Ambos valores los obtienes al usar `/cifrar`.",
+            parse_mode="Markdown",
+        )
+        return
+
+    # El salt es el último arg, el cifrado es el penúltimo
+    # (el cifrado nunca tiene espacios porque es hex)
+    salt_dado    = args[-1]
+    cifrado_dado = args[-2]
+
+    def es_hex(s):
+        return all(c in "0123456789abcdefABCDEF" for c in s)
+
+    if not es_hex(salt_dado) or not es_hex(cifrado_dado):
+        await update.message.reply_text(
+            "❌ El cifrado o el salt no tienen formato válido.\n"
+            "Asegúrate de copiar exactamente los valores que devolvió el bot."
+        )
+        return
+
+    try:
+        texto_original = ccar_descifrar(cifrado_dado, _SEED, salt_dado)
+        respuesta = (
+            f"✅ *Texto descifrado*\n\n"
+            f"📄 *Resultado:*\n`{texto_original}`"
+        )
+        await update.message.reply_text(respuesta, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Error en /descifrar: {e}")
+        await update.message.reply_text(
+            "⚠️ No se pudo descifrar.\n"
+            "Verifica que el cifrado y el salt sean exactamente los que devolvió el bot."
+        )
+
+
 async def cmd_irvin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chiste = random.choice(CHISTES)
     await update.message.reply_text(
@@ -277,14 +366,16 @@ async def cmd_pibble(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("start",     cmd_start))
-    app.add_handler(CommandHandler("ayuda",     cmd_ayuda))
-    app.add_handler(CommandHandler("hash",      cmd_hash))
-    app.add_handler(CommandHandler("verificar", cmd_verificar))
-    app.add_handler(CommandHandler("irvin",     cmd_irvin))
-    app.add_handler(CommandHandler("pibble",    cmd_pibble))
+    app.add_handler(CommandHandler("start",      cmd_start))
+    app.add_handler(CommandHandler("ayuda",      cmd_ayuda))
+    app.add_handler(CommandHandler("cifrar",     cmd_cifrar))
+    app.add_handler(CommandHandler("descifrar",  cmd_descifrar))
+    app.add_handler(CommandHandler("hash",       cmd_hash))
+    app.add_handler(CommandHandler("verificar",  cmd_verificar))
+    app.add_handler(CommandHandler("irvin",      cmd_irvin))
+    app.add_handler(CommandHandler("pibble",     cmd_pibble))
 
-    print("🤖 Bot CCAR iniciado. Esperando mensajes... (Ctrl+C para detener)")
+    print("🤖 Bot CCARolina iniciado. Esperando mensajes... (Ctrl+C para detener)")
 
     async with app:
         await app.start()
